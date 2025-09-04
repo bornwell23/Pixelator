@@ -10,7 +10,49 @@ from typing import Optional
 from ..core.image_processor import ImageProcessor
 from ..algorithms.manager import AlgorithmManager
 from ..palettes.color_palette import ColorPalette, PredefinedPalettes
+from ..filters.image_filters import ImageFilters
 from ..utils.exceptions import PixelArtError
+
+
+def get_dynamic_algorithms() -> list[str]:
+    """Get all available algorithms from the algorithm manager."""
+    return AlgorithmManager.get_available_algorithms()
+
+
+def get_dynamic_palettes() -> list[str]:
+    """Get all available palettes from the palette manager."""
+    return list(PredefinedPalettes.get_all_palettes().keys())
+
+
+def get_dynamic_filters() -> dict[str, tuple[float, float]]:
+    """Get all available filters with their parameter ranges for randomization."""
+    available_filters = ImageFilters.get_available_filters()
+    
+    # Define parameter ranges for filters that take numeric parameters
+    # This is the single source of truth for filter parameter ranges
+    filter_ranges = {
+        "contrast": (0.5, 2.0),
+        "brightness": (0.6, 1.4),
+        "saturation": (0.5, 2.0),
+        "blur": (0.5, 2.0),
+        "sharpen": (0.1, 1.0),
+        "posterize": (2, 8),         # bits
+        "noise": (0.05, 0.3),        # intensity
+        "sepia": (0.3, 1.0),         # intensity
+        "vignette": (0.2, 0.8),      # intensity
+        "halftone": (3, 8),          # dot_size
+        "cross_hatch": (4, 12),      # line_density
+        "oil_painting": (2, 6),      # radius (intensity will be auto-set)
+        "film_grain": (0.05, 0.2),  # intensity
+        "edge_enhance": (1.0, 1.0),  # no parameters
+        "emboss": (1.0, 1.0),        # no parameters
+        "scan_lines": (2, 5),        # spacing (note: this also takes intensity as second param)
+        "chromatic_aberration": (1, 4),  # offset
+    }
+    
+    # Only return filters that are actually available and have defined ranges
+    return {name: ranges for name, ranges in filter_ranges.items() 
+            if name in available_filters}
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -27,8 +69,10 @@ Examples:
   pixelart-creator input.jpg --target-size 64 64                        # Resize to 64x64 pixels (default behavior)
   pixelart-creator input.jpg --target-size 64 64 --keep-original-size   # Pixelated effect, keep original size
   pixelart-creator input.jpg --demo                                     # Generate multiple demo styles
+  pixelart-creator "*.jpg" --demo                                       # Generate demo styles for all JPG files
   pixelart-creator input.jpg --random                                   # Generate 1 random variation
   pixelart-creator input.jpg --random 10                                # Generate 10 random variations
+  pixelart-creator "photos/*.png" --random 5                            # Generate 5 random variations for each PNG
   pixelart-creator "photos/*.jpg" output_folder/                        # Batch process all JPGs in photos folder
   pixelart-creator "*.png" --algorithm nearest --palette gameboy        # Process all PNGs in current folder
   pixelart-creator input.jpg output.png --algorithm edge_preserving --palette gameboy
@@ -416,82 +460,87 @@ def process_demo(args) -> None:
         print(f"Error: Input file '{input_path}' does not exist")
         sys.exit(1)
     
-    # Create demo output directory
-    demo_dir = Path("demo_output")
-    demo_dir.mkdir(exist_ok=True)
-    
+    # Create demo output directory - use standard output_images folder
     base_name = input_path.stem
+    demo_dir = Path("output_images")
+    demo_dir.mkdir(parents=True, exist_ok=True)
     
-    # Define demo styles
+    # Get available options dynamically
+    available_algorithms = get_dynamic_algorithms()
+    available_palettes = get_dynamic_palettes()
+    
+    # Define demo styles - curated selection showcasing different capabilities
     demo_styles = [
         {
             "name": "gameboy_classic",
             "description": "Classic Game Boy green screen",
-            "algorithm": "edge_preserving",
+            "algorithm": "edge_preserving" if "edge_preserving" in available_algorithms else available_algorithms[0],
             "target_size": (64, 64),
-            "palette": "gameboy",
+            "palette": "gameboy" if "gameboy" in available_palettes else None,
             "dithering": True,
             "filters": ["contrast:1.2", "brightness:0.9"]
         },
         {
             "name": "nes_retro",
             "description": "NES-style 8-bit colors",
-            "algorithm": "nearest",
+            "algorithm": "nearest" if "nearest" in available_algorithms else available_algorithms[0],
             "target_size": (80, 80),
-            "palette": "nes",
+            "palette": "nes" if "nes" in available_palettes else None,
             "dithering": False,
             "filters": ["contrast:1.1", "saturation:1.2"]
         },
         {
             "name": "c64_nostalgic",
             "description": "Commodore 64 color palette",
-            "algorithm": "bilinear",
+            "algorithm": "bilinear" if "bilinear" in available_algorithms else available_algorithms[0],
             "target_size": (96, 96),
-            "palette": "c64",
+            "palette": "c64" if "c64" in available_palettes else None,
             "dithering": True,
             "filters": ["contrast:1.0"]
         },
         {
+            "name": "modern_moody",
+            "description": "Modern mood-based palette",
+            "algorithm": "lanczos" if "lanczos" in available_algorithms else available_algorithms[0],
+            "target_size": (128, 128),
+            "palette": "serene" if "serene" in available_palettes else ("dramatic" if "dramatic" in available_palettes else None),
+            "dithering": True,
+            "filters": ["contrast:1.3", "vignette:0.4"]
+        },
+        {
+            "name": "minimal_art",
+            "description": "Minimal low-color palette",
+            "algorithm": "quantization" if "quantization" in available_algorithms else available_algorithms[0],
+            "target_size": (64, 64),
+            "palette": "minimal_2bit" if "minimal_2bit" in available_palettes else ("duochrome_blue" if "duochrome_blue" in available_palettes else None),
+            "dithering": False,
+            "filters": ["posterize:4", "contrast:1.4"]
+        },
+        {
             "name": "crt_monitor",
             "description": "CRT monitor with scan lines",
-            "algorithm": "bilinear",
+            "algorithm": "bilinear" if "bilinear" in available_algorithms else available_algorithms[0],
             "scale_factor": 8,
             "keep_original_size": True,
             "filters": ["scan_lines:3:0.4", "vignette:0.5", "chromatic_aberration:2"]
         },
         {
             "name": "high_quality",
-            "description": "High-quality Lanczos pixelation",
-            "algorithm": "lanczos",
+            "description": "High-quality pixelation",
+            "algorithm": "lanczos" if "lanczos" in available_algorithms else available_algorithms[0],
             "target_size": (128, 128),
             "filters": ["edge_enhance", "sharpen:0.3", "contrast:1.1"]
         },
         {
-            "name": "monochrome_art",
-            "description": "Dramatic black and white",
-            "algorithm": "edge_preserving",
-            "target_size": (64, 64),
-            "palette": "monochrome",
-            "dithering": True,
-            "filters": ["contrast:2.0", "brightness:0.8"]
-        },
-        {
-            "name": "sepia_vintage",
-            "description": "Vintage sepia-toned pixel art",
-            "algorithm": "lanczos",
-            "scale_factor": 6,
-            "keep_original_size": True,
-            "filters": ["sepia:0.8", "vignette:0.3", "contrast:1.1"]
-        },
-        {
             "name": "super_pixel_art",
             "description": "Super pixel clustering effect",
-            "algorithm": "super_pixel",
+            "algorithm": "super_pixel" if "super_pixel" in available_algorithms else available_algorithms[0],
             "target_size": (80, 80),
             "filters": ["posterize:6", "saturation:1.3", "contrast:1.1"]
         }
     ]
     
+    print(f"\n=== Demo Generation: {input_path.name} ===")
     print(f"Generating {len(demo_styles)} demo styles from '{input_path}'...")
     print(f"Output directory: {demo_dir}")
     
@@ -500,7 +549,7 @@ def process_demo(args) -> None:
     
     for style in demo_styles:
         try:
-            output_file = demo_dir / f"{base_name}_{style['name']}.png"
+            output_file = demo_dir / f"{base_name}_demo_{style['name']}.png"
             
             if args.verbose:
                 print(f"\nCreating: {style['name']} - {style['description']}")
@@ -596,35 +645,17 @@ def process_random(args) -> None:
         print("Error: Count must be positive")
         sys.exit(1)
     
-    # Create random output directory
-    random_dir = Path("random_output")
-    random_dir.mkdir(exist_ok=True)
-    
+    # Create random output directory - use standard output_images folder
     base_name = input_path.stem
+    random_dir = Path("output_images")
+    random_dir.mkdir(parents=True, exist_ok=True)
     
-    # Define available options for randomization
-    algorithms = ["nearest", "bilinear", "lanczos", "edge_preserving", "super_pixel", "adaptive", 
-                 "quantization", "voronoi", "hexagonal"]
-    palettes = ["gameboy", "nes", "c64", "monochrome", "pico8", "gameboy_color", "synthwave", 
-               "earth_tones", "pastels", "atari2600"]
+    # Get available options dynamically from managers
+    algorithms = get_dynamic_algorithms()
+    palettes = get_dynamic_palettes()
+    available_filters = get_dynamic_filters()
     
-    # Define possible filter combinations
-    available_filters = {
-        "contrast": (0.5, 2.0),      # (min, max)
-        "brightness": (0.6, 1.4),
-        "saturation": (0.5, 2.0),
-        "blur": (0.5, 2.0),
-        "sharpen": (0.1, 1.0),
-        "posterize": (2, 8),         # bits
-        "noise": (0.05, 0.3),        # intensity
-        "sepia": (0.3, 1.0),         # intensity
-        "vignette": (0.2, 0.8),      # intensity
-        "halftone": (3, 8),          # dot_size
-        "cross_hatch": (4, 12),      # line_density
-        "oil_painting": (2, 6),      # radius (intensity will be auto-set)
-        "film_grain": (0.05, 0.2),  # intensity
-    }
-    
+    print(f"\n=== Random Generation: {input_path.name} ===")
     print(f"Generating {count} random pixel art variations from '{input_path}'...")
     print(f"Output directory: {random_dir}")
     
@@ -636,6 +667,12 @@ def process_random(args) -> None:
             # Randomize parameters
             algorithm = random.choice(algorithms)
             palette = random.choice(palettes + [None]) if random.random() < 0.8 else None
+
+            # Initialize processor (early so we can get the image size)
+            processor = ImageProcessor()
+            processor.load_image(args.input)
+
+            original_size = processor.current_image.size
             
             # Random size - either scale factor or target size
             if random.choice([True, False]):
@@ -648,7 +685,12 @@ def process_random(args) -> None:
                     size_desc += "_keepsize"
             else:
                 # Use target size
-                size = random.choice([32, 48, 64, 80, 96, 128, 256, 512])
+                # Generate available sizes up to original image size
+                max_size = min(original_size)
+                available_sizes = [size for size in [64, 80, 96, 128, 256, 512] if size <= max_size]
+                if not available_sizes:
+                    available_sizes = [max_size]
+                size = random.choice(available_sizes)
                 target_size = (size, size)
                 keep_original_size = False
                 size_desc = f"{size}x{size}"
@@ -657,7 +699,7 @@ def process_random(args) -> None:
             dithering = random.choice([True, False]) if palette else False
             
             # Random filters (0-3 filters)
-            num_filters = random.choices([0, 1, 2, 3], weights=[0.4, 0.4, 0.15, 0.05])[0]
+            num_filters = random.choices([0, 1, 2, 3], weights=[0.6, 0.30, 0.15, 0.05])[0]
             filters = []
             filter_names = random.sample(list(available_filters.keys()), 
                                        min(num_filters, len(available_filters)))
@@ -673,7 +715,7 @@ def process_random(args) -> None:
                 filter_desc_parts.append(f"{filter_name}{value}")
             
             # Build descriptive filename
-            filename_parts = [base_name, algorithm]
+            filename_parts = [base_name, "random", f"v{i+1:03d}", algorithm]
             if palette:
                 filename_parts.append(palette)
             if dithering:
@@ -702,9 +744,7 @@ def process_random(args) -> None:
             if args.verbose:
                 print(f"  Processing...")
             
-            # Initialize processor
-            processor = ImageProcessor()
-            processor.load_image(args.input)
+            
             
             # Get algorithm
             algorithm_obj = AlgorithmManager.get_algorithm(algorithm)
@@ -718,7 +758,6 @@ def process_random(args) -> None:
                 processor.pixelate(algorithm_obj, target_size, resize_to_target=not keep_original_size)
             else:
                 # Calculate target size from scale factor
-                original_size = processor.current_image.size
                 calc_target_size = (
                     int(original_size[0] / scale_factor),
                     int(original_size[1] / scale_factor)
@@ -853,6 +892,32 @@ def process_wildcard_batch(args) -> None:
         print(f"Errors: {errors}")
 
 
+def get_input_files(input_path: str) -> list[str]:
+    """
+    Get list of input files, expanding wildcards if present.
+    Returns a list of file paths.
+    """
+    import glob
+    from pathlib import Path
+    
+    # Check if input contains wildcards
+    if '*' in input_path or '?' in input_path:
+        matched_files = glob.glob(input_path)
+        if not matched_files:
+            return []
+        
+        # Filter for image files
+        image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.tif', '.webp'}
+        image_files = [f for f in matched_files if Path(f).suffix.lower() in image_extensions]
+        return image_files
+    else:
+        # Single file - just return it if it exists
+        if Path(input_path).exists():
+            return [input_path]
+        else:
+            return []
+
+
 def main():
     """Main entry point for the CLI."""
     parser = create_parser()
@@ -865,12 +930,36 @@ def main():
         if not args.input:
             print("Error: Input file is required for demo mode")
             sys.exit(1)
-        process_demo(args)
+        
+        # Get input files (supporting wildcards)
+        input_files = get_input_files(args.input)
+        if not input_files:
+            print(f"Error: No image files found matching: {args.input}")
+            sys.exit(1)
+        
+        # Process demo for each input file
+        for input_file in input_files:
+            temp_args = argparse.Namespace(**vars(args))
+            temp_args.input = input_file
+            process_demo(temp_args)
+            
     elif args.random:
         if not args.input:
             print("Error: Input file is required for random mode")
             sys.exit(1)
-        process_random(args)
+        
+        # Get input files (supporting wildcards)
+        input_files = get_input_files(args.input)
+        if not input_files:
+            print(f"Error: No image files found matching: {args.input}")
+            sys.exit(1)
+        
+        # Process random variations for each input file
+        for input_file in input_files:
+            temp_args = argparse.Namespace(**vars(args))
+            temp_args.input = input_file
+            process_random(temp_args)
+            
     elif args.batch:
         if not args.input_dir or not args.output_dir:
             print("Error: --input-dir and --output-dir are required for batch processing")
